@@ -5,37 +5,66 @@ const cors = require("cors");
 const { ClerkExpressWithAuth } = require("@clerk/clerk-sdk-node");
 require("dotenv").config(); // Load environment variables
 
-// Initialize Firebase Admin SDK
-admin.initializeApp({
-  credential: admin.credential.cert({
-    projectId: process.env.FIREBASE_PROJECT_ID,
-    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-    privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
-  }),
-});
+// Ensure required environment variables are present
+const requiredEnv = [
+  "FIREBASE_PROJECT_ID",
+  "FIREBASE_CLIENT_EMAIL",
+  "FIREBASE_PRIVATE_KEY",
+  "CLERK_SECRET_KEY"
+];
+const missingEnv = requiredEnv.filter((key) => !process.env[key]);
+if (missingEnv.length > 0) {
+  console.error(
+    `❌ Missing required environment variables: ${missingEnv.join(", ")}`
+  );
+  process.exit(1);
+}
+
+// Initialize Firebase Admin SDK (guard against double init in dev/hot reload)
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.cert({
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+      privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+    }),
+  });
+}
 
 const db = admin.firestore();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware
+// Middleware order: CORS first, then body parsing
 app.use(cors());
 app.use(bodyParser.json());
 
 // Clerk middleware to get auth info from headers
 const clerk = ClerkExpressWithAuth();
 
-// --- TEMPORARY: Disable Clerk middleware for diagnostics ---
-// app.post("/create-firebase-token", clerk, async (req, res) => {
-app.post("/create-firebase-token", async (req, res) => {
-  console.log("✅ Route hit");
-  res.json({ firebaseToken: "fake_token_for_testing" });
+// Clerk-protected route to create Firebase custom token
+app.post("/create-firebase-token", clerk, async (req, res) => {
+  try {
+    // Clerk middleware adds req.auth
+    const clerkUserId = req.auth?.userId;
+    if (!clerkUserId) {
+      return res.status(401).json({ error: "Unauthorized: No Clerk user ID found" });
+    }
+
+    // Create a Firebase custom token for this Clerk user
+    const firebaseToken = await admin.auth().createCustomToken(clerkUserId);
+
+    res.json({ firebaseToken });
+  } catch (error) {
+    console.error("❌ Error creating Firebase token:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
-// ----------------------------------------------------------
 
 // Webhook endpoint for Clerk events
-app.post("/webhook", async (req, res) => {
+// Use raw body for Clerk webhooks if signature verification is needed in the future
+app.post("/webhook", express.json(), async (req, res) => {
   const event = req.body;
 
   try {
