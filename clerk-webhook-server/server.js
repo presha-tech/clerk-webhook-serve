@@ -5,6 +5,21 @@ const cors = require("cors");
 const { ClerkExpressWithAuth } = require("@clerk/clerk-sdk-node");
 require("dotenv").config(); // Load environment variables
 
+// Ensure required environment variables are present
+const requiredEnv = [
+  "FIREBASE_PROJECT_ID",
+  "FIREBASE_CLIENT_EMAIL",
+  "FIREBASE_PRIVATE_KEY",
+  "CLERK_SECRET_KEY"
+];
+const missingEnv = requiredEnv.filter((key) => !process.env[key]);
+if (missingEnv.length > 0) {
+  console.error(
+    `❌ Missing required environment variables: ${missingEnv.join(", ")}`
+  );
+  process.exit(1);
+}
+
 // Initialize Firebase Admin SDK
 admin.initializeApp({
   credential: admin.credential.cert({
