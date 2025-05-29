@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -13,6 +12,8 @@ import {
 import { useRouter } from 'expo-router';
 import { useSignIn, useAuth } from '@clerk/clerk-expo';
 import { Colors } from './../constants/Colors';
+import { getAuth, signInWithCustomToken } from 'firebase/auth';
+import axios from 'axios';
 
 export default function SignInScreen() {
   const [email, setEmail] = useState('');
@@ -22,7 +23,7 @@ export default function SignInScreen() {
   const [message, setMessage] = useState('');
   const router = useRouter();
   const { signIn, setActive } = useSignIn();
-  const { isSignedIn, isLoaded } = useAuth();
+  const { isSignedIn, isLoaded, getToken } = useAuth();
 
   // 1. If already signed in, redirect to /home
   useEffect(() => {
@@ -39,7 +40,6 @@ export default function SignInScreen() {
       </View>
     );
   }
-
 
   // Only show sign-in UI if not signed in
   if (isSignedIn) {
@@ -78,6 +78,26 @@ export default function SignInScreen() {
     }
   };
 
+  // --- Clerk to Firebase Auth Sync ---
+  const syncClerkWithFirebase = async () => {
+    try {
+      const clerkToken = await getToken();
+      const response = await axios.post(
+        'https://clerk-webhook-serve.onrender.com/create-firebase-token',
+        {},
+        { headers: { Authorization: `Bearer ${clerkToken}` } }
+      );
+      const { firebaseToken } = response.data;
+      await signInWithCustomToken(getAuth(), firebaseToken);
+      console.log('🔥 Signed into Firebase!');
+      return true;
+    } catch (err) {
+      console.error('Failed to sync Clerk and Firebase:', err);
+      setMessage('Failed to sign in to Firebase. Please try again.');
+      return false;
+    }
+  };
+
   const handleVerifyOtp = async () => {
     if (!otp) {
       Alert.alert('Error', 'Please enter the OTP.');
@@ -95,7 +115,12 @@ export default function SignInScreen() {
 
       if (result.status === 'complete') {
         await setActive({ session: result.createdSessionId });
-        router.replace('/home');
+        // --- Sync Clerk with Firebase Auth ---
+        const firebaseOk = await syncClerkWithFirebase();
+        if (firebaseOk) {
+          router.replace('/home');
+        }
+        // If Firebase sign-in fails, error message is shown and user stays on this screen
       } else {
         setMessage('Invalid OTP. Please try again.');
       }

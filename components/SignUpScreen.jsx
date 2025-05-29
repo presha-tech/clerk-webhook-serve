@@ -12,6 +12,8 @@ import {
 import { useRouter } from 'expo-router';
 import { useSignUp, useAuth } from '@clerk/clerk-expo';
 import { Colors } from './../constants/Colors';
+import { getAuth, signInWithCustomToken } from 'firebase/auth';
+import axios from 'axios';
 
 export default function SignUpScreen() {
   const [email, setEmail] = useState('');
@@ -21,7 +23,7 @@ export default function SignUpScreen() {
   const [message, setMessage] = useState('');
   const router = useRouter();
   const { signUp, setActive } = useSignUp();
-  
+  const { getToken } = useAuth();
 
   const handleSendOtp = async () => {
     const trimmedEmail = email.trim();
@@ -82,6 +84,26 @@ export default function SignUpScreen() {
     }
   };
 
+  // --- Clerk to Firebase Auth Sync ---
+  const syncClerkWithFirebase = async () => {
+    try {
+      const clerkToken = await getToken();
+      const response = await axios.post(
+        'https://clerk-webhook-serve.onrender.com/create-firebase-token',
+        {},
+        { headers: { Authorization: `Bearer ${clerkToken}` } }
+      );
+      const { firebaseToken } = response.data;
+      await signInWithCustomToken(getAuth(), firebaseToken);
+      console.log('🔥 Signed into Firebase!');
+      return true;
+    } catch (err) {
+      console.error('Failed to sync Clerk and Firebase:', err);
+      setMessage('Failed to sign in to Firebase. Please try again.');
+      return false;
+    }
+  };
+
   const handleVerifyOtp = async () => {
     if (!otp) {
       Alert.alert('Error', 'Please enter the OTP.');
@@ -98,7 +120,12 @@ export default function SignUpScreen() {
 
       if (result.status === 'complete') {
         await setActive({ session: result.createdSessionId });
-        router.replace('/business-dashboard');
+        // --- Sync Clerk with Firebase Auth ---
+        const firebaseOk = await syncClerkWithFirebase();
+        if (firebaseOk) {
+          router.replace('/business-dashboard');
+        }
+        // If Firebase sign-in fails, error message is shown and user stays on this screen
       } else {
         setMessage('Invalid OTP. Please try again.');
       }
