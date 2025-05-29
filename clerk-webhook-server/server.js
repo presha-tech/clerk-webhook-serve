@@ -20,21 +20,23 @@ if (missingEnv.length > 0) {
   process.exit(1);
 }
 
-// Initialize Firebase Admin SDK
-admin.initializeApp({
-  credential: admin.credential.cert({
-    projectId: process.env.FIREBASE_PROJECT_ID,
-    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-    privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
-  }),
-});
+// Initialize Firebase Admin SDK (guard against double init in dev/hot reload)
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.cert({
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+      privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+    }),
+  });
+}
 
 const db = admin.firestore();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware
+// Middleware order: CORS first, then body parsing
 app.use(cors());
 app.use(bodyParser.json());
 
@@ -61,7 +63,8 @@ app.post("/create-firebase-token", clerk, async (req, res) => {
 });
 
 // Webhook endpoint for Clerk events
-app.post("/webhook", async (req, res) => {
+// Use raw body for Clerk webhooks if signature verification is needed in the future
+app.post("/webhook", express.json(), async (req, res) => {
   const event = req.body;
 
   try {
